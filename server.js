@@ -28,7 +28,7 @@ wss.on('connection', (ws) => {
       switch(msg.type) {
         case 'login':
           if (msg.user_id) {
-            const { data: user, error } = await supabase.from('users').select('*').eq('id', msg.user_id).single();
+            const { data: user } = await supabase.from('users').select('*').eq('id', msg.user_id).single();
             if (user) {
               userSockets.set(ws, user);
               clients.set(user.id, ws);
@@ -73,31 +73,24 @@ wss.on('connection', (ws) => {
   });
 });
 
-// API
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
 app.post('/api/login', async (req, res) => {
   const { phone } = req.body;
-  
   const { data: existingUser } = await supabase.from('users').select('*').eq('phone', phone).single();
-  
   if (existingUser) {
     await supabase.from('users').update({ is_online: 1 }).eq('id', existingUser.id);
     res.json(existingUser);
   } else {
-    const { data: newUser, error } = await supabase.from('users').insert({ phone, is_online: 1 }).select().single();
-    if (error) {
-      res.status(500).json({ error: error.message });
-    } else {
-      res.json(newUser);
-    }
+    const { data: newUser } = await supabase.from('users').insert({ phone, is_online: 1 }).select().single();
+    res.json(newUser);
   }
 });
 
 app.get('/api/users', async (req, res) => {
-  const { data: users, error } = await supabase.from('users').select('*');
+  const { data: users } = await supabase.from('users').select('*');
   res.json(users || []);
 });
 
@@ -112,51 +105,35 @@ app.get('/api/messages', async (req, res) => {
 
 app.post('/api/send_message', async (req, res) => {
   const { sender_id, receiver_id, message, msg_type } = req.body;
-  
   const { data: newMsg } = await supabase.from('messages').insert({
-    sender_id,
-    receiver_id,
-    message,
-    type: msg_type || 'text'
+    sender_id, receiver_id, message, type: msg_type || 'text'
   }).select().single();
   
-  // Обновляем чат
   const { data: existingChat } = await supabase.from('chats')
     .select('*')
     .or(`and(user1_id.eq.${sender_id},user2_id.eq.${receiver_id}),and(user1_id.eq.${receiver_id},user2_id.eq.${sender_id})`)
     .single();
   
   if (existingChat) {
-    await supabase.from('chats').update({ 
-      last_message: message,
-      last_message_time: new Date().toISOString()
-    }).eq('id', existingChat.id);
+    await supabase.from('chats').update({ last_message: message, last_message_time: new Date().toISOString() }).eq('id', existingChat.id);
   } else {
-    await supabase.from('chats').insert({
-      user1_id: sender_id,
-      user2_id: receiver_id,
-      last_message: message,
-      last_message_time: new Date().toISOString()
-    });
+    await supabase.from('chats').insert({ user1_id: sender_id, user2_id: receiver_id, last_message: message, last_message_time: new Date().toISOString() });
   }
   
-  res.json({ success: true, message: newMsg });
+  res.json({ success: true });
 });
 
 app.get('/api/chats/:user_id', async (req, res) => {
   const userId = req.params.user_id;
-  
   const { data: chats } = await supabase.from('chats')
     .select('*')
     .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
     .order('last_message_time', { ascending: false });
   
   const formattedChats = [];
-  
   for (const chat of (chats || [])) {
     const otherId = chat.user1_id == userId ? chat.user2_id : chat.user1_id;
     const { data: otherUser } = await supabase.from('users').select('*').eq('id', otherId).single();
-    
     formattedChats.push({
       ...chat,
       other_user_id: otherId,
@@ -165,7 +142,6 @@ app.get('/api/chats/:user_id', async (req, res) => {
       other_user_online: otherUser?.is_online || 0
     });
   }
-  
   res.json(formattedChats);
 });
 
